@@ -208,6 +208,7 @@ def _draw_ascii_clock_and_date(
     time_str = time.strftime("%H:%M", now_struct)
     seconds_str = time.strftime("%S", now_struct)
     date_block_str = time.strftime("%d %b", now_struct).upper()  # e.g. 28 JAN
+    weekday_str = time.strftime("%A", now_struct)
 
     # Figlet instances
     clock_fig = Figlet(font="big")
@@ -357,28 +358,37 @@ def _draw_ascii_clock_and_date(
         except curses.error:
             pass
 
-    # Draw labels/conditions below each temp block (one line under the art)
-    if last_y is not None and weather is not None:
+    # Draw weekday under the date, and labels/conditions under temp blocks
+    if last_y is not None:
         label_y = last_y + 1
         if label_y < usable_h - 1:
-            if now_temp_lines and now_x < width:
-                now_label = f"Now: {weather.now_desc}"[: max(0, width - now_x)]
+            # Weekday centered under the date block
+            weekday_x = date_x + max(0, (right_width - len(weekday_str)) // 2)
+            if weekday_x < width:
                 try:
-                    stdscr.addstr(label_y, now_x, now_label)
+                    stdscr.addstr(label_y, weekday_x, weekday_str[: max(0, width - weekday_x)])
                 except curses.error:
                     pass
-            if plus2_temp_lines and plus2_x < width:
-                plus2_label = "+2h"[: max(0, width - plus2_x)]
-                try:
-                    stdscr.addstr(label_y, plus2_x, plus2_label)
-                except curses.error:
-                    pass
-            if plus4_temp_lines and plus4_x < width:
-                plus4_label = "+4h"[: max(0, width - plus4_x)]
-                try:
-                    stdscr.addstr(label_y, plus4_x, plus4_label)
-                except curses.error:
-                    pass
+
+            if weather is not None:
+                if now_temp_lines and now_x < width:
+                    now_label = f"Now: {weather.now_desc}"[: max(0, width - now_x)]
+                    try:
+                        stdscr.addstr(label_y, now_x, now_label)
+                    except curses.error:
+                        pass
+                if plus2_temp_lines and plus2_x < width:
+                    plus2_label = "+2h"[: max(0, width - plus2_x)]
+                    try:
+                        stdscr.addstr(label_y, plus2_x, plus2_label)
+                    except curses.error:
+                        pass
+                if plus4_temp_lines and plus4_x < width:
+                    plus4_label = "+4h"[: max(0, width - plus4_x)]
+                    try:
+                        stdscr.addstr(label_y, plus4_x, plus4_label)
+                    except curses.error:
+                        pass
 
     return last_y
 

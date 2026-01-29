@@ -21,4 +21,4 @@ fi
 setterm --term linux --blank poke < "$TTY" > "$TTY"
 
 # Start the uv-managed clock dashboard on this VT and switch to it
-openvt -f -c "$VT_NUM" -s -- bash -lc 'cd /home/bol/clock && TERM=linux uv run clock'
+openvt -f -c "$VT_NUM" -s -- bash -lc 'cd /home/bol/clock-dashboard-dashboard && TERM=linux uv run clock'

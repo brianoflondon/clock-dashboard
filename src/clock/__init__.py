@@ -401,14 +401,22 @@ def _draw(stdscr: "curses._CursesWindow") -> None:  # type: ignore[name-defined]
 
     last_weather_time = 0.0
     weather: Optional[WeatherInfo] = None
+    last_good_weather: Optional[WeatherInfo] = None
 
     while True:
         now = time.time()
 
         # Periodically refresh weather
         if now - last_weather_time > WEATHER_REFRESH_SECONDS:
-            weather = get_weather()
+            new_weather = get_weather()
             last_weather_time = now
+            if new_weather is not None:
+                weather = new_weather
+                last_good_weather = new_weather
+            else:
+                # On error, keep showing the last good reading if we have one
+                if last_good_weather is not None:
+                    weather = last_good_weather
 
         stdscr.erase()
         h, w = stdscr.getmaxyx()

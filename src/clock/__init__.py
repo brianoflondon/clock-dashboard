@@ -22,6 +22,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from datetime import datetime, time as dtime, timedelta
 from typing import Iterable, List, Optional, Sequence, Tuple
 
@@ -43,6 +44,52 @@ WEATHER_URL: str = "https://wttr.in/Ramat+Hasharon?format=j1"
 
 # Timezone for Ramat Hasharon
 TZ = ZoneInfo("Asia/Jerusalem")
+
+
+@dataclass
+class WeatherInfo:
+    pass
+
+# Fact-of-the-day API (api-ninjas)
+FACT_REFRESH_SECONDS: int = 3600  # refresh every hour by default
+FACT_API_URL: str = "https://api.api-ninjas.com/v1/facts"
+
+
+def _load_env_from_dotenv() -> None:
+    """Load environment variables from a local .env file if present.
+
+    We only care about API-related variables (e.g. API_NINJAS_KEY). This
+    function is safe to call multiple times and is a no-op if .env is
+    missing. Secrets are never logged or exposed.
+    """
+
+    import os
+
+    # Try current working directory first, then project root relative to this file
+    candidates = [
+        Path.cwd() / ".env",
+        Path(__file__).resolve().parent.parent / ".env",
+    ]
+    for env_path in candidates:
+        if env_path.is_file():
+            try:
+                for line in env_path.read_text().splitlines():
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if "=" not in line:
+                        continue
+                    key, value = line.split("=", 1)
+                    key = key.strip()
+                    value = value.strip().strip('"').strip("'")
+                    if key and value and key not in os.environ:
+                        os.environ[key] = value
+            except OSError:
+                pass
+            break
+
+
+_load_env_from_dotenv()
 
 
 @dataclass
@@ -141,6 +188,63 @@ def _nearest_temp(points: Sequence[Tuple[datetime, str]], target: datetime) -> O
             best_temp = temp_c
 
     return best_temp
+
+
+def get_fact_of_the_day() -> str:
+    """Return a short fact-of-the-day string, or an empty string if unavailable.
+
+    Uses the api-ninjas facts endpoint and reads API_NINJAS_KEY from the
+    environment (.env is loaded at import time). The result is ASCII-only
+    and truncated to a reasonable length for the TTY.
+    """
+
+    import os
+
+    # Prefer API_NINJAS_KEY, but fall back to common alternatives
+    api_key = (
+        os.getenv("API_NINJAS_KEY")
+        or os.getenv("API-NINJAS")
+        or os.getenv("API_NINJAS")
+        or os.getenv("X-Api-Key")
+        or os.getenv("X_API_KEY")
+    )
+    if not api_key:
+        return ""
+
+    req = urllib.request.Request(FACT_API_URL)
+    req.add_header("X-Api-Key", api_key)
+
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            raw = resp.read().decode("utf-8", errors="ignore")
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError):
+        return ""
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return ""
+
+    fact_text = ""
+    if isinstance(data, list) and data:
+        first = data[0]
+        if isinstance(first, dict) and first.get("fact"):
+            fact_text = str(first["fact"])
+        elif isinstance(first, str):
+            fact_text = first
+    elif isinstance(data, dict) and data.get("fact"):
+        fact_text = str(data["fact"])
+
+    fact_text = _ascii(fact_text).strip()
+    if not fact_text:
+        return ""
+
+    # Keep the line reasonably short for the TTY
+    max_len = 160
+    if len(fact_text) > max_len:
+        fact_text = fact_text[: max_len - 3] + "..."
+
+    return fact_text
 
 
 def get_weather() -> Optional[WeatherInfo]:
@@ -302,6 +406,7 @@ def _draw_ascii_clock_and_date(
             plus2_x = now_x
 
     last_y: Optional[int] = None
+    label_y: Optional[int] = None
 
     for i in range(draw_rows):
         y = art_top + i
@@ -390,7 +495,7 @@ def _draw_ascii_clock_and_date(
                     except curses.error:
                         pass
 
-    return last_y
+    return label_y
 
 
 def _draw(stdscr: "curses._CursesWindow") -> None:  # type: ignore[name-defined]
@@ -413,6 +518,9 @@ def _draw(stdscr: "curses._CursesWindow") -> None:  # type: ignore[name-defined]
     weather: Optional[WeatherInfo] = None
     last_good_weather: Optional[WeatherInfo] = None
 
+    last_fact_time = 0.0
+    fact_text: str = ""
+
     while True:
         now = time.time()
 
@@ -427,6 +535,13 @@ def _draw(stdscr: "curses._CursesWindow") -> None:  # type: ignore[name-defined]
                 # On error, keep showing the last good reading if we have one
                 if last_good_weather is not None:
                     weather = last_good_weather
+
+        # Periodically refresh fact-of-the-day
+        if now - last_fact_time > FACT_REFRESH_SECONDS:
+            new_fact = get_fact_of_the_day()
+            last_fact_time = now
+            if new_fact:
+                fact_text = new_fact
 
         stdscr.erase()
         h, w = stdscr.getmaxyx()
@@ -452,7 +567,33 @@ def _draw(stdscr: "curses._CursesWindow") -> None:  # type: ignore[name-defined]
             continue
 
         # Large ASCII-art clock + seconds + date + temp blocks at the top
-        _draw_ascii_clock_and_date(stdscr, usable_h=usable_h, width=w, weather=weather)
+        label_y = _draw_ascii_clock_and_date(stdscr, usable_h=usable_h, width=w, weather=weather)
+
+        # Fact-of-the-day text one blank line below the weekday/labels row, if available
+        if fact_text:
+            import textwrap
+
+            header_y = usable_h - 1
+            if label_y is not None:
+                top = label_y + 2  # one blank line between labels and fact
+            else:
+                top = max(0, header_y - 2)
+
+            prefix = "Fact: "
+            raw_line = prefix + fact_text
+            # Wrap carefully to the available width (avoid breaking words)
+            wrap_width = max(10, w - 1)
+            wrapped = textwrap.wrap(raw_line, width=wrap_width, break_long_words=False)
+
+            for i, line in enumerate(wrapped):
+                y = top + i
+                if y >= header_y:
+                    break
+                line = line[: max(0, w)]
+                try:
+                    stdscr.addstr(y, 0, line)
+                except curses.error:
+                    pass
 
         # Header in the bottom-right corner of the usable region
         header_text = "Clock dashboard q to quit"

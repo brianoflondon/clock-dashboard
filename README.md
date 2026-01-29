@@ -70,13 +70,13 @@ VIEWPORT_RATIO: float = 0.33
 
 ## Weather Source
 
-Weather is fetched from:
+Weather is fetched from wttr.in for Ramat Hasharon using a JSON endpoint:
 
 ```python
-WEATHER_URL: str = "https://wttr.in/Ramat+Hasharon?format=3"
+WEATHER_URL: str = "https://wttr.in/Ramat+Hasharon?format=j1"
 ```
 
-This returns a one-line summary, e.g. `Ramat Hasharon: +15°C, Rainy`. The dashboard caches the value and refreshes it periodically (every 600 seconds by default).
+The dashboard parses the current conditions and hourly forecast from this JSON, caching the last successful reading and refreshing it periodically (every 600 seconds by default).
 
 ## Launching on tty1 Manually
 
@@ -150,6 +150,32 @@ sudo journalctl -u clock-dashboard.service
 ```
 
 On the next boot, `tty1` will automatically show the clock dashboard instead of a login prompt.
+
+## Fact of the Day
+
+The dashboard can show a short **fact of the day** line near the bottom of the visible region.
+
+Facts are fetched from the [API Ninjas facts endpoint](https://api.api-ninjas.com/v1/facts) using an API key stored in a local `.env` file. The key is read via the `API_NINJAS_KEY` environment variable.
+
+Example `.env` (not committed to git):
+
+```bash
+API_NINJAS_KEY=your_actual_api_key_here
+```
+
+Key implementation details:
+
+- `.env` is **ignored by git** (listed in `.gitignore`).
+- The module loads `.env` on startup and sets `API_NINJAS_KEY` if it is not already in the environment.
+- Facts are refreshed at most once per hour by default.
+- On failures, the last successful fact is kept on screen so the line does not disappear.
+- Non-ASCII characters are stripped and very long facts are truncated so they fit on a single TTY line.
+
+Visually, the line looks like:
+
+```text
+Fact: <short fact of the day>
+```
 
 ## Customization
 
